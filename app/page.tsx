@@ -95,6 +95,22 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
+  const [clearing, setClearing] = useState(false)
+
+  const clearData = async () => {
+    if (!confirm('Clear all data for today? This cannot be undone.')) return
+    setClearing(true)
+    try {
+      const res = await fetch('/api/clear', { method: 'POST' })
+      if (res.ok) {
+        await fetchData()
+      }
+    } catch (err) {
+      console.error('Failed to clear:', err)
+    } finally {
+      setClearing(false)
+    }
+  }
 
   const fetchData = async () => {
     try {
@@ -191,6 +207,13 @@ export default function Dashboard() {
             <div className="header-date">
               {data?.date || '—'}
             </div>
+            <button
+              className="clear-btn"
+              onClick={clearData}
+              disabled={clearing}
+            >
+              {clearing ? 'Clearing...' : 'Clear Data'}
+            </button>
           </div>
         </header>
 
@@ -580,6 +603,30 @@ const globalStyles = `
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 8px;
+  }
+
+  .clear-btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 8px 16px;
+    background: rgba(255, 51, 102, 0.1);
+    color: var(--accent-pink);
+    border: 1px solid rgba(255, 51, 102, 0.3);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 0.5px;
+  }
+
+  .clear-btn:hover:not(:disabled) {
+    background: rgba(255, 51, 102, 0.2);
+    border-color: rgba(255, 51, 102, 0.5);
+  }
+
+  .clear-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   /* Error banner */
