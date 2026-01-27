@@ -1,0 +1,104 @@
+import { Redis } from '@upstash/redis'
+
+// Initialize Redis client from environment variables
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL!,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+})
+
+export interface ActivityEvent {
+  timestamp: number
+  profileId: string
+  action: string
+  details?: Record<string, any>
+  receivedAt?: number
+}
+
+export interface ProfileStats {
+  likes: number
+  bookmarks: number
+  searches: number
+  explores: number
+  videos: number
+  sessions: number
+  lastActivity: number | null
+}
+
+const EVENTS_KEY = 'warmup:events'
+const STATS_PREFIX = 'warmup:stats:'
+const MAX_EVENTS = 500
+
+/**
+ * Add an activity event
+ */
+export async function addEvent(event: ActivityEvent): Promise<void> {
+  event.receivedAt = Date.now()
+
+  // Add to events list (keep last 500)
+  await redis.lpush(EVENTS_KEY, JSON.stringify(event))
+  await redis.ltrim(EVENTS_KEY, 0, MAX_EVENTS - 1)
+
+  // Update profile stats for today
+  const today = new Date().toISOString().split('T')[0]
+  const statsKey = `${STATS_PREFIX}${today}:${event.profileId}`
+
+  const existing = await redis.get<ProfileStats>(statsKey)
+  const stats: ProfileStats = existing || {
+    likes: 0,
+    bookmarks: 0,
+    searches: 0,
+    explores: 0,
+    videos: 0,
+    sessions: 0,
+    lastActivity: null,
+  }
+
+  stats.lastActivity = event.timestamp
+
+  switch (event.action) {
+    case 'like': stats.likes++; break
+    case 'bookmark': stats.bookmarks++; break
+    case 'search': stats.searches++; break
+    case 'explore': stats.explores++; break
+    case 'video_watch': stats.videos++; break
+    case 'session_end': stats.sessions++; break
+  }
+
+  await redis.set(statsKey, stats, { ex: 86400 * 7 }) // Expire after 7 days
+}
+
+/**
+ * Get recent events
+ */
+export async function getRecentEvents(limit = 100): Promise<ActivityEvent[]> {
+  const events = await redis.lrange(EVENTS_KEY, 0, limit - 1)
+  return events.map(e => typeof e === 'string' ? JSON.parse(e) : e as ActivityEvent)
+}
+
+/**
+ * Get stats for all profiles for a given date
+ */
+export async function getStatsForDate(date: string): Promise<Record<string, ProfileStats>> {
+  const pattern = `${STATS_PREFIX}${date}:*`
+  const keys = await redis.keys(pattern)
+
+  const stats: Record<string, ProfileStats> = {}
+
+  for (const key of keys) {
+    const profileId = key.replace(`${STATS_PREFIX}${date}:`, '')
+    const profileStats = await redis.get<ProfileStats>(key)
+    if (profileStats) {
+      stats[profileId] = profileStats
+    }
+  }
+
+  return stats
+}
+
+/**
+ * Get today's stats
+ */
+export async function getTodayStats(): Promise<Record<string, ProfileStats>> {
+  const today = new Date().toISOString().split('T')[0]
+  return getStatsForDate(today)
+}
