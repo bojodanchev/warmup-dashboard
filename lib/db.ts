@@ -9,6 +9,7 @@ const redis = new Redis({
 export interface ActivityEvent {
   timestamp: number
   profileId: string
+  username?: string // X username like @username
   action: string
   details?: Record<string, any>
   receivedAt?: number
@@ -22,6 +23,7 @@ export interface ProfileStats {
   videos: number
   sessions: number
   lastActivity: number | null
+  username?: string // X username for display
 }
 
 const EVENTS_KEY = 'warmup:events'
@@ -51,9 +53,14 @@ export async function addEvent(event: ActivityEvent): Promise<void> {
     videos: 0,
     sessions: 0,
     lastActivity: null,
+    username: undefined,
   }
 
   stats.lastActivity = event.timestamp
+  // Update username if provided (keeps latest username)
+  if (event.username) {
+    stats.username = event.username
+  }
 
   switch (event.action) {
     case 'like': stats.likes++; break

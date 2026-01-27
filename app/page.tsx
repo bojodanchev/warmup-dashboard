@@ -10,11 +10,13 @@ interface ProfileStats {
   videos: number
   sessions: number
   lastActivity: number | null
+  username?: string
 }
 
 interface ActivityEvent {
   timestamp: number
   profileId: string
+  username?: string
   action: string
   details?: Record<string, any>
 }
@@ -292,7 +294,7 @@ export default function Dashboard() {
                       <div className="profile-header">
                         <div className="profile-id">
                           <span className={`profile-status ${isActive ? 'online' : 'offline'}`} />
-                          {id}
+                          {stats.username || id}
                         </div>
                         {stats.lastActivity && (
                           <span className="profile-time">{getRelativeTime(stats.lastActivity)}</span>
@@ -349,7 +351,7 @@ export default function Dashboard() {
                   style={{ animationDelay: `${i * 30}ms` }}
                 >
                   <span className="activity-time">{formatTime(event.timestamp)}</span>
-                  <span className="activity-profile">{event.profileId}</span>
+                  <span className="activity-profile">{event.username || event.profileId}</span>
                   <ActionIcon action={event.action} />
                   <span className="activity-action">
                     {formatAction(event.action)}
