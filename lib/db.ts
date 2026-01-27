@@ -68,7 +68,7 @@ export async function addEvent(event: ActivityEvent): Promise<void> {
     case 'search': stats.searches++; break
     case 'explore': stats.explores++; break
     case 'video_watch': stats.videos++; break
-    case 'session_end': stats.sessions++; break
+    case 'session_start': stats.sessions++; break
   }
 
   await redis.set(statsKey, stats, { ex: 86400 * 7 }) // Expire after 7 days
