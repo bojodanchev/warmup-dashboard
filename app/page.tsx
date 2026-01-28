@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useRef } from 'react'
 
+// ============ TYPES ============
+
 interface ProfileStats {
   likes: number
   bookmarks: number
@@ -21,13 +23,54 @@ interface ActivityEvent {
   details?: Record<string, any>
 }
 
-interface DashboardData {
+interface WarmupData {
   date: string
   profiles: Record<string, ProfileStats>
   recentEvents: ActivityEvent[]
 }
 
-// Animated counter component
+interface StoredRepost {
+  id: string
+  detectedPostId: string
+  personaId: string
+  originalTweetId: string
+  originalAuthor: string
+  spunContent: string
+  postedTweetId?: string
+  mediaIncluded: boolean
+  scheduledFor: string
+  postedAt?: string
+  status: 'scheduled' | 'posted' | 'failed'
+  error?: string
+}
+
+interface PersonaPostStats {
+  personaId: string
+  handle: string
+  displayName: string
+  emoji: string
+  scheduled: number
+  posted: number
+  failed: number
+  lastActivity: string | null
+}
+
+interface PostsData {
+  date: string
+  totals: {
+    scheduled: number
+    posted: number
+    failed: number
+  }
+  personas: PersonaPostStats[]
+  recentPosts: StoredRepost[]
+  upcomingPosts: StoredRepost[]
+}
+
+type TabType = 'warmup' | 'posts'
+
+// ============ SHARED COMPONENTS ============
+
 function AnimatedNumber({ value, duration = 500 }: { value: number; duration?: number }) {
   const [displayValue, setDisplayValue] = useState(0)
   const prevValue = useRef(0)
@@ -40,7 +83,7 @@ function AnimatedNumber({ value, duration = 500 }: { value: number; duration?: n
     const animate = () => {
       const elapsed = Date.now() - startTime
       const progress = Math.min(elapsed / duration, 1)
-      const eased = 1 - Math.pow(1 - progress, 3) // ease-out cubic
+      const eased = 1 - Math.pow(1 - progress, 3)
       setDisplayValue(Math.round(startValue + diff * eased))
 
       if (progress < 1) {
@@ -56,7 +99,6 @@ function AnimatedNumber({ value, duration = 500 }: { value: number; duration?: n
   return <>{displayValue}</>
 }
 
-// Live pulse indicator
 function LivePulse() {
   return (
     <span className="live-pulse">
@@ -66,7 +108,6 @@ function LivePulse() {
   )
 }
 
-// Action icon component with glow
 function ActionIcon({ action }: { action: string }) {
   const iconMap: Record<string, { icon: string; color: string }> = {
     like: { icon: '♥', color: '#ff3366' },
@@ -90,49 +131,16 @@ function ActionIcon({ action }: { action: string }) {
   )
 }
 
-export default function Dashboard() {
-  const [data, setData] = useState<DashboardData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
-  const [clearing, setClearing] = useState(false)
+// ============ WARMUP TAB ============
 
-  const clearData = async () => {
-    if (!confirm('Clear all data for today? This cannot be undone.')) return
-    setClearing(true)
-    try {
-      const res = await fetch('/api/clear', { method: 'POST' })
-      if (res.ok) {
-        await fetchData()
-      }
-    } catch (err) {
-      console.error('Failed to clear:', err)
-    } finally {
-      setClearing(false)
-    }
-  }
-
-  const fetchData = async () => {
-    try {
-      const res = await fetch('/api/stats')
-      if (!res.ok) throw new Error('Failed to fetch')
-      const json = await res.json()
-      setData(json)
-      setError(null)
-      setLastUpdate(new Date())
-    } catch (err) {
-      setError('Connection lost')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    fetchData()
-    const interval = setInterval(fetchData, 5000)
-    return () => clearInterval(interval)
-  }, [])
-
+function WarmupTab({ data, loading, lastUpdate, fetchData, clearData, clearing }: {
+  data: WarmupData | null
+  loading: boolean
+  lastUpdate: Date | null
+  fetchData: () => void
+  clearData: () => void
+  clearing: boolean
+}) {
   const formatTime = (ts: number) => {
     return new Date(ts).toLocaleTimeString('en-US', {
       hour: '2-digit',
@@ -177,6 +185,505 @@ export default function Dashboard() {
 
   return (
     <>
+      {/* Stats Grid */}
+      <section className="stats-grid">
+        <div className="stat-card stat-card-large">
+          <div className="stat-icon" style={{ color: '#ff3366' }}>♥</div>
+          <div className="stat-content">
+            <div className="stat-value">
+              <AnimatedNumber value={totals.likes} />
+            </div>
+            <div className="stat-label">Total Likes</div>
+          </div>
+          <div className="stat-glow" style={{ background: 'radial-gradient(circle at center, rgba(255,51,102,0.15) 0%, transparent 70%)' }} />
+        </div>
+
+        <div className="stat-card">
+          <div className="stat-icon" style={{ color: '#00f0ff' }}>◆</div>
+          <div className="stat-content">
+            <div className="stat-value">
+              <AnimatedNumber value={totals.bookmarks} />
+            </div>
+            <div className="stat-label">Bookmarks</div>
+          </div>
+          <div className="stat-glow" style={{ background: 'radial-gradient(circle at center, rgba(0,240,255,0.1) 0%, transparent 70%)' }} />
+        </div>
+
+        <div className="stat-card">
+          <div className="stat-icon" style={{ color: '#a855f7' }}>▶</div>
+          <div className="stat-content">
+            <div className="stat-value">
+              <AnimatedNumber value={totals.videos} />
+            </div>
+            <div className="stat-label">Videos</div>
+          </div>
+          <div className="stat-glow" style={{ background: 'radial-gradient(circle at center, rgba(168,85,247,0.1) 0%, transparent 70%)' }} />
+        </div>
+
+        <div className="stat-card">
+          <div className="stat-icon" style={{ color: '#00ff88' }}>●</div>
+          <div className="stat-content">
+            <div className="stat-value">
+              <AnimatedNumber value={totals.sessions} />
+            </div>
+            <div className="stat-label">Sessions</div>
+          </div>
+          <div className="stat-glow" style={{ background: 'radial-gradient(circle at center, rgba(0,255,136,0.1) 0%, transparent 70%)' }} />
+        </div>
+
+        <div className="stat-card stat-card-small">
+          <div className="stat-icon" style={{ color: '#ffcc00' }}>◎</div>
+          <div className="stat-content">
+            <div className="stat-value">
+              <AnimatedNumber value={totals.searches} />
+            </div>
+            <div className="stat-label">Searches</div>
+          </div>
+        </div>
+
+        <div className="stat-card stat-card-small">
+          <div className="stat-icon" style={{ color: '#00ff88' }}>✦</div>
+          <div className="stat-content">
+            <div className="stat-value">
+              <AnimatedNumber value={totals.explores} />
+            </div>
+            <div className="stat-label">Explores</div>
+          </div>
+        </div>
+      </section>
+
+      {/* Main Content Grid */}
+      <div className="main-grid">
+        {/* Profiles Panel */}
+        <section className="panel profiles-panel">
+          <div className="panel-header">
+            <h2 className="panel-title">
+              <span className="panel-title-icon">◈</span>
+              PROFILES
+            </h2>
+            <span className="panel-count">{profileCount}</span>
+          </div>
+          <div className="profiles-list">
+            {data?.profiles && Object.entries(data.profiles)
+              .sort((a, b) => (b[1].lastActivity || 0) - (a[1].lastActivity || 0))
+              .map(([id, stats], index) => {
+                const isActive = stats.lastActivity && Date.now() - stats.lastActivity < 300000
+                return (
+                  <div
+                    key={id}
+                    className={`profile-card ${isActive ? 'active' : ''}`}
+                    style={{ animationDelay: `${index * 50}ms` }}
+                  >
+                    <div className="profile-header">
+                      <div className="profile-id">
+                        <span className={`profile-status ${isActive ? 'online' : 'offline'}`} />
+                        {stats.username || id}
+                      </div>
+                      {stats.lastActivity && (
+                        <span className="profile-time">{getRelativeTime(stats.lastActivity)}</span>
+                      )}
+                    </div>
+                    <div className="profile-stats">
+                      <span className="profile-stat">
+                        <span style={{ color: '#ff3366' }}>♥</span> {stats.likes}
+                      </span>
+                      <span className="profile-stat">
+                        <span style={{ color: '#00f0ff' }}>◆</span> {stats.bookmarks}
+                      </span>
+                      <span className="profile-stat">
+                        <span style={{ color: '#a855f7' }}>▶</span> {stats.videos}
+                      </span>
+                      <span className="profile-stat">
+                        <span style={{ color: '#ffcc00' }}>◎</span> {stats.searches}
+                      </span>
+                    </div>
+                    <div className="profile-sessions">
+                      {stats.sessions} session{stats.sessions !== 1 ? 's' : ''} today
+                    </div>
+                    {isActive && <div className="profile-active-glow" />}
+                  </div>
+                )
+              })}
+            {(!data?.profiles || profileCount === 0) && (
+              <div className="empty-state">
+                <span className="empty-icon">◇</span>
+                <span>Waiting for activity...</span>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Activity Feed */}
+        <section className="panel activity-panel">
+          <div className="panel-header">
+            <h2 className="panel-title">
+              <span className="panel-title-icon">◈</span>
+              ACTIVITY FEED
+            </h2>
+            {lastUpdate && (
+              <span className="panel-update">
+                Updated {formatTime(lastUpdate.getTime())}
+              </span>
+            )}
+          </div>
+          <div className="activity-list">
+            {data?.recentEvents?.map((event, i) => (
+              <div
+                key={`${event.timestamp}-${i}`}
+                className="activity-item"
+                style={{ animationDelay: `${i * 30}ms` }}
+              >
+                <span className="activity-time">{formatTime(event.timestamp)}</span>
+                <span className="activity-profile">{event.username || event.profileId}</span>
+                <ActionIcon action={event.action} />
+                <span className="activity-action">
+                  {formatAction(event.action)}
+                  {event.details?.keyword && (
+                    <span className="activity-detail">"{event.details.keyword}"</span>
+                  )}
+                  {event.details?.duration && (
+                    <span className="activity-detail">{event.details.duration}</span>
+                  )}
+                </span>
+              </div>
+            ))}
+            {(!data?.recentEvents || data.recentEvents.length === 0) && (
+              <div className="empty-state">
+                <span className="empty-icon">◇</span>
+                <span>No recent activity</span>
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+    </>
+  )
+}
+
+// ============ POSTS TAB ============
+
+function PostsTab({ data, loading, lastUpdate }: {
+  data: PostsData | null
+  loading: boolean
+  lastUpdate: Date | null
+}) {
+  const formatTime = (iso: string) => {
+    return new Date(iso).toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    })
+  }
+
+  const formatDate = (iso: string) => {
+    const date = new Date(iso)
+    const today = new Date()
+    const tomorrow = new Date(today)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+
+    if (date.toDateString() === today.toDateString()) {
+      return 'Today'
+    } else if (date.toDateString() === tomorrow.toDateString()) {
+      return 'Tomorrow'
+    }
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  }
+
+  const getRelativeTime = (iso: string) => {
+    const diff = Date.now() - new Date(iso).getTime()
+    const mins = Math.floor(diff / 60000)
+    if (mins < 1) return 'just now'
+    if (mins < 60) return `${mins}m ago`
+    if (mins < 1440) return `${Math.floor(mins / 60)}h ago`
+    return `${Math.floor(mins / 1440)}d ago`
+  }
+
+  const getTimeUntil = (iso: string) => {
+    const diff = new Date(iso).getTime() - Date.now()
+    const mins = Math.floor(diff / 60000)
+    if (mins < 1) return 'now'
+    if (mins < 60) return `in ${mins}m`
+    if (mins < 1440) return `in ${Math.floor(mins / 60)}h`
+    return `in ${Math.floor(mins / 1440)}d`
+  }
+
+  const truncateText = (text: string, maxLen: number) => {
+    if (text.length <= maxLen) return text
+    return text.slice(0, maxLen) + '...'
+  }
+
+  const totals = data?.totals || { scheduled: 0, posted: 0, failed: 0 }
+
+  return (
+    <>
+      {/* Stats Grid */}
+      <section className="stats-grid stats-grid-posts">
+        <div className="stat-card stat-card-posts">
+          <div className="stat-icon" style={{ color: '#ffcc00' }}>⏱</div>
+          <div className="stat-content">
+            <div className="stat-value">
+              <AnimatedNumber value={totals.scheduled} />
+            </div>
+            <div className="stat-label">Scheduled</div>
+          </div>
+          <div className="stat-glow" style={{ background: 'radial-gradient(circle at center, rgba(255,204,0,0.15) 0%, transparent 70%)' }} />
+        </div>
+
+        <div className="stat-card stat-card-posts">
+          <div className="stat-icon" style={{ color: '#00ff88' }}>✓</div>
+          <div className="stat-content">
+            <div className="stat-value">
+              <AnimatedNumber value={totals.posted} />
+            </div>
+            <div className="stat-label">Posted</div>
+          </div>
+          <div className="stat-glow" style={{ background: 'radial-gradient(circle at center, rgba(0,255,136,0.15) 0%, transparent 70%)' }} />
+        </div>
+
+        <div className="stat-card stat-card-posts">
+          <div className="stat-icon" style={{ color: '#ff3366' }}>✕</div>
+          <div className="stat-content">
+            <div className="stat-value">
+              <AnimatedNumber value={totals.failed} />
+            </div>
+            <div className="stat-label">Failed</div>
+          </div>
+          <div className="stat-glow" style={{ background: 'radial-gradient(circle at center, rgba(255,51,102,0.15) 0%, transparent 70%)' }} />
+        </div>
+      </section>
+
+      {/* Main Content Grid */}
+      <div className="main-grid">
+        {/* Accounts Panel */}
+        <section className="panel profiles-panel">
+          <div className="panel-header">
+            <h2 className="panel-title">
+              <span className="panel-title-icon">◈</span>
+              ACCOUNTS
+            </h2>
+            <span className="panel-count">{data?.personas?.length || 0}</span>
+          </div>
+          <div className="profiles-list">
+            {data?.personas?.map((persona, index) => {
+              const total = persona.posted + persona.scheduled + persona.failed
+              const hasActivity = persona.lastActivity !== null
+              return (
+                <div
+                  key={persona.personaId}
+                  className="profile-card"
+                  style={{ animationDelay: `${index * 50}ms` }}
+                >
+                  <div className="profile-header">
+                    <div className="profile-id">
+                      <span className="persona-emoji">{persona.emoji}</span>
+                      {persona.handle}
+                    </div>
+                    {hasActivity && (
+                      <span className="profile-time">{getRelativeTime(persona.lastActivity!)}</span>
+                    )}
+                  </div>
+                  <div className="profile-stats">
+                    <span className="profile-stat">
+                      <span style={{ color: '#ffcc00' }}>⏱</span> {persona.scheduled}
+                    </span>
+                    <span className="profile-stat">
+                      <span style={{ color: '#00ff88' }}>✓</span> {persona.posted}
+                    </span>
+                    <span className="profile-stat">
+                      <span style={{ color: '#ff3366' }}>✕</span> {persona.failed}
+                    </span>
+                  </div>
+                  <div className="profile-sessions">
+                    {total} total post{total !== 1 ? 's' : ''}
+                  </div>
+                </div>
+              )
+            })}
+            {(!data?.personas || data.personas.length === 0) && (
+              <div className="empty-state">
+                <span className="empty-icon">◇</span>
+                <span>No posting activity yet</span>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Posts Feed */}
+        <section className="panel activity-panel posts-panel">
+          <div className="panel-header">
+            <h2 className="panel-title">
+              <span className="panel-title-icon">◈</span>
+              POST QUEUE
+            </h2>
+            {lastUpdate && (
+              <span className="panel-update">
+                Updated {formatTime(lastUpdate.toISOString())}
+              </span>
+            )}
+          </div>
+
+          {/* Upcoming Posts */}
+          {data?.upcomingPosts && data.upcomingPosts.length > 0 && (
+            <div className="posts-section">
+              <div className="posts-section-header">
+                <span className="posts-section-icon" style={{ color: '#ffcc00' }}>⏱</span>
+                <span className="posts-section-title">UPCOMING</span>
+                <span className="posts-section-count">{data.upcomingPosts.length}</span>
+              </div>
+              <div className="posts-list">
+                {data.upcomingPosts.map((post, i) => {
+                  const meta = data.personas.find(p => p.personaId === post.personaId)
+                  return (
+                    <div
+                      key={post.id}
+                      className="post-item scheduled"
+                      style={{ animationDelay: `${i * 30}ms` }}
+                    >
+                      <div className="post-meta">
+                        <span className="post-emoji">{meta?.emoji || '•'}</span>
+                        <span className="post-handle">{meta?.handle || post.personaId}</span>
+                        <span className="post-time scheduled">{getTimeUntil(post.scheduledFor)}</span>
+                      </div>
+                      <div className="post-content">{truncateText(post.spunContent, 120)}</div>
+                      {post.mediaIncluded && (
+                        <span className="post-media-badge">+ media</span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Recent Posts */}
+          {data?.recentPosts && data.recentPosts.length > 0 && (
+            <div className="posts-section">
+              <div className="posts-section-header">
+                <span className="posts-section-icon" style={{ color: '#00ff88' }}>✓</span>
+                <span className="posts-section-title">RECENT</span>
+                <span className="posts-section-count">{data.recentPosts.length}</span>
+              </div>
+              <div className="posts-list">
+                {data.recentPosts.map((post, i) => {
+                  const meta = data.personas.find(p => p.personaId === post.personaId)
+                  const isPosted = post.status === 'posted'
+                  return (
+                    <div
+                      key={post.id}
+                      className={`post-item ${post.status}`}
+                      style={{ animationDelay: `${i * 30}ms` }}
+                    >
+                      <div className="post-meta">
+                        <span className="post-emoji">{meta?.emoji || '•'}</span>
+                        <span className="post-handle">{meta?.handle || post.personaId}</span>
+                        <span className={`post-status ${post.status}`}>
+                          {isPosted ? '✓' : '✕'}
+                        </span>
+                        <span className="post-time">{getRelativeTime(post.postedAt || post.scheduledFor)}</span>
+                      </div>
+                      <div className="post-content">{truncateText(post.spunContent, 120)}</div>
+                      {post.error && (
+                        <div className="post-error">{truncateText(post.error, 60)}</div>
+                      )}
+                      {post.mediaIncluded && (
+                        <span className="post-media-badge">+ media</span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {(!data?.upcomingPosts?.length && !data?.recentPosts?.length) && (
+            <div className="empty-state">
+              <span className="empty-icon">◇</span>
+              <span>No posts yet</span>
+            </div>
+          )}
+        </section>
+      </div>
+    </>
+  )
+}
+
+// ============ MAIN DASHBOARD ============
+
+export default function Dashboard() {
+  const [activeTab, setActiveTab] = useState<TabType>('warmup')
+  const [warmupData, setWarmupData] = useState<WarmupData | null>(null)
+  const [postsData, setPostsData] = useState<PostsData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
+  const [clearing, setClearing] = useState(false)
+
+  const clearData = async () => {
+    if (!confirm('Clear all data for today? This cannot be undone.')) return
+    setClearing(true)
+    try {
+      const res = await fetch('/api/clear', { method: 'POST' })
+      if (res.ok) {
+        await fetchWarmupData()
+      }
+    } catch (err) {
+      console.error('Failed to clear:', err)
+    } finally {
+      setClearing(false)
+    }
+  }
+
+  const fetchWarmupData = async () => {
+    try {
+      const res = await fetch('/api/stats')
+      if (!res.ok) throw new Error('Failed to fetch')
+      const json = await res.json()
+      setWarmupData(json)
+      setError(null)
+      setLastUpdate(new Date())
+    } catch (err) {
+      setError('Connection lost')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchPostsData = async () => {
+    try {
+      const res = await fetch('/api/posts')
+      if (!res.ok) throw new Error('Failed to fetch')
+      const json = await res.json()
+      setPostsData(json)
+      setError(null)
+      setLastUpdate(new Date())
+    } catch (err) {
+      setError('Connection lost')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchData = () => {
+    if (activeTab === 'warmup') {
+      fetchWarmupData()
+    } else {
+      fetchPostsData()
+    }
+  }
+
+  useEffect(() => {
+    fetchData()
+    const interval = setInterval(fetchData, 5000)
+    return () => clearInterval(interval)
+  }, [activeTab])
+
+  const profileCount = Object.keys(warmupData?.profiles || {}).length
+  const activeProfiles = Object.values(warmupData?.profiles || {}).filter(
+    p => p.lastActivity && Date.now() - p.lastActivity < 300000
+  ).length
+
+  return (
+    <>
       <style>{globalStyles}</style>
 
       <div className="dashboard">
@@ -190,30 +697,67 @@ export default function Dashboard() {
           <div className="header-left">
             <div className="logo">
               <span className="logo-icon">⬡</span>
-              <span className="logo-text">WARMUP</span>
-              <span className="logo-badge">CTRL</span>
+              <span className="logo-text">X CONTROL</span>
+              <span className="logo-badge">v2</span>
             </div>
             <LivePulse />
           </div>
-          <div className="header-right">
-            <div className="header-stat">
-              <span className="header-stat-value">{profileCount}</span>
-              <span className="header-stat-label">PROFILES</span>
-            </div>
-            <div className="header-stat active">
-              <span className="header-stat-value">{activeProfiles}</span>
-              <span className="header-stat-label">ACTIVE</span>
-            </div>
-            <div className="header-date">
-              {data?.date || '—'}
-            </div>
+
+          {/* Tabs */}
+          <div className="header-tabs">
             <button
-              className="clear-btn"
-              onClick={clearData}
-              disabled={clearing}
+              className={`tab-btn ${activeTab === 'warmup' ? 'active' : ''}`}
+              onClick={() => setActiveTab('warmup')}
             >
-              {clearing ? 'Clearing...' : 'Clear Data'}
+              <span className="tab-icon">♥</span>
+              Warmup
             </button>
+            <button
+              className={`tab-btn ${activeTab === 'posts' ? 'active' : ''}`}
+              onClick={() => setActiveTab('posts')}
+            >
+              <span className="tab-icon">✎</span>
+              Posts
+            </button>
+          </div>
+
+          <div className="header-right">
+            {activeTab === 'warmup' && (
+              <>
+                <div className="header-stat">
+                  <span className="header-stat-value">{profileCount}</span>
+                  <span className="header-stat-label">PROFILES</span>
+                </div>
+                <div className="header-stat active">
+                  <span className="header-stat-value">{activeProfiles}</span>
+                  <span className="header-stat-label">ACTIVE</span>
+                </div>
+              </>
+            )}
+            {activeTab === 'posts' && (
+              <>
+                <div className="header-stat">
+                  <span className="header-stat-value">{postsData?.totals.scheduled || 0}</span>
+                  <span className="header-stat-label">QUEUED</span>
+                </div>
+                <div className="header-stat active">
+                  <span className="header-stat-value">{postsData?.totals.posted || 0}</span>
+                  <span className="header-stat-label">POSTED</span>
+                </div>
+              </>
+            )}
+            <div className="header-date">
+              {warmupData?.date || postsData?.date || '—'}
+            </div>
+            {activeTab === 'warmup' && (
+              <button
+                className="clear-btn"
+                onClick={clearData}
+                disabled={clearing}
+              >
+                {clearing ? 'Clearing...' : 'Clear Data'}
+              </button>
+            )}
           </div>
         </header>
 
@@ -225,182 +769,28 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Stats Grid */}
-        <section className="stats-grid">
-          <div className="stat-card stat-card-large">
-            <div className="stat-icon" style={{ color: '#ff3366' }}>♥</div>
-            <div className="stat-content">
-              <div className="stat-value">
-                <AnimatedNumber value={totals.likes} />
-              </div>
-              <div className="stat-label">Total Likes</div>
-            </div>
-            <div className="stat-glow" style={{ background: 'radial-gradient(circle at center, rgba(255,51,102,0.15) 0%, transparent 70%)' }} />
-          </div>
-
-          <div className="stat-card">
-            <div className="stat-icon" style={{ color: '#00f0ff' }}>◆</div>
-            <div className="stat-content">
-              <div className="stat-value">
-                <AnimatedNumber value={totals.bookmarks} />
-              </div>
-              <div className="stat-label">Bookmarks</div>
-            </div>
-            <div className="stat-glow" style={{ background: 'radial-gradient(circle at center, rgba(0,240,255,0.1) 0%, transparent 70%)' }} />
-          </div>
-
-          <div className="stat-card">
-            <div className="stat-icon" style={{ color: '#a855f7' }}>▶</div>
-            <div className="stat-content">
-              <div className="stat-value">
-                <AnimatedNumber value={totals.videos} />
-              </div>
-              <div className="stat-label">Videos</div>
-            </div>
-            <div className="stat-glow" style={{ background: 'radial-gradient(circle at center, rgba(168,85,247,0.1) 0%, transparent 70%)' }} />
-          </div>
-
-          <div className="stat-card">
-            <div className="stat-icon" style={{ color: '#00ff88' }}>●</div>
-            <div className="stat-content">
-              <div className="stat-value">
-                <AnimatedNumber value={totals.sessions} />
-              </div>
-              <div className="stat-label">Sessions</div>
-            </div>
-            <div className="stat-glow" style={{ background: 'radial-gradient(circle at center, rgba(0,255,136,0.1) 0%, transparent 70%)' }} />
-          </div>
-
-          <div className="stat-card stat-card-small">
-            <div className="stat-icon" style={{ color: '#ffcc00' }}>◎</div>
-            <div className="stat-content">
-              <div className="stat-value">
-                <AnimatedNumber value={totals.searches} />
-              </div>
-              <div className="stat-label">Searches</div>
-            </div>
-          </div>
-
-          <div className="stat-card stat-card-small">
-            <div className="stat-icon" style={{ color: '#00ff88' }}>✦</div>
-            <div className="stat-content">
-              <div className="stat-value">
-                <AnimatedNumber value={totals.explores} />
-              </div>
-              <div className="stat-label">Explores</div>
-            </div>
-          </div>
-        </section>
-
-        {/* Main Content Grid */}
-        <div className="main-grid">
-          {/* Profiles Panel */}
-          <section className="panel profiles-panel">
-            <div className="panel-header">
-              <h2 className="panel-title">
-                <span className="panel-title-icon">◈</span>
-                PROFILES
-              </h2>
-              <span className="panel-count">{profileCount}</span>
-            </div>
-            <div className="profiles-list">
-              {data?.profiles && Object.entries(data.profiles)
-                .sort((a, b) => (b[1].lastActivity || 0) - (a[1].lastActivity || 0))
-                .map(([id, stats], index) => {
-                  const isActive = stats.lastActivity && Date.now() - stats.lastActivity < 300000
-                  return (
-                    <div
-                      key={id}
-                      className={`profile-card ${isActive ? 'active' : ''}`}
-                      style={{ animationDelay: `${index * 50}ms` }}
-                    >
-                      <div className="profile-header">
-                        <div className="profile-id">
-                          <span className={`profile-status ${isActive ? 'online' : 'offline'}`} />
-                          {stats.username || id}
-                        </div>
-                        {stats.lastActivity && (
-                          <span className="profile-time">{getRelativeTime(stats.lastActivity)}</span>
-                        )}
-                      </div>
-                      <div className="profile-stats">
-                        <span className="profile-stat">
-                          <span style={{ color: '#ff3366' }}>♥</span> {stats.likes}
-                        </span>
-                        <span className="profile-stat">
-                          <span style={{ color: '#00f0ff' }}>◆</span> {stats.bookmarks}
-                        </span>
-                        <span className="profile-stat">
-                          <span style={{ color: '#a855f7' }}>▶</span> {stats.videos}
-                        </span>
-                        <span className="profile-stat">
-                          <span style={{ color: '#ffcc00' }}>◎</span> {stats.searches}
-                        </span>
-                      </div>
-                      <div className="profile-sessions">
-                        {stats.sessions} session{stats.sessions !== 1 ? 's' : ''} today
-                      </div>
-                      {isActive && <div className="profile-active-glow" />}
-                    </div>
-                  )
-                })}
-              {(!data?.profiles || profileCount === 0) && (
-                <div className="empty-state">
-                  <span className="empty-icon">◇</span>
-                  <span>Waiting for activity...</span>
-                </div>
-              )}
-            </div>
-          </section>
-
-          {/* Activity Feed */}
-          <section className="panel activity-panel">
-            <div className="panel-header">
-              <h2 className="panel-title">
-                <span className="panel-title-icon">◈</span>
-                ACTIVITY FEED
-              </h2>
-              {lastUpdate && (
-                <span className="panel-update">
-                  Updated {formatTime(lastUpdate.getTime())}
-                </span>
-              )}
-            </div>
-            <div className="activity-list">
-              {data?.recentEvents?.map((event, i) => (
-                <div
-                  key={`${event.timestamp}-${i}`}
-                  className="activity-item"
-                  style={{ animationDelay: `${i * 30}ms` }}
-                >
-                  <span className="activity-time">{formatTime(event.timestamp)}</span>
-                  <span className="activity-profile">{event.username || event.profileId}</span>
-                  <ActionIcon action={event.action} />
-                  <span className="activity-action">
-                    {formatAction(event.action)}
-                    {event.details?.keyword && (
-                      <span className="activity-detail">"{event.details.keyword}"</span>
-                    )}
-                    {event.details?.duration && (
-                      <span className="activity-detail">{event.details.duration}</span>
-                    )}
-                  </span>
-                </div>
-              ))}
-              {(!data?.recentEvents || data.recentEvents.length === 0) && (
-                <div className="empty-state">
-                  <span className="empty-icon">◇</span>
-                  <span>No recent activity</span>
-                </div>
-              )}
-            </div>
-          </section>
-        </div>
+        {/* Tab Content */}
+        {activeTab === 'warmup' ? (
+          <WarmupTab
+            data={warmupData}
+            loading={loading}
+            lastUpdate={lastUpdate}
+            fetchData={fetchWarmupData}
+            clearData={clearData}
+            clearing={clearing}
+          />
+        ) : (
+          <PostsTab
+            data={postsData}
+            loading={loading}
+            lastUpdate={lastUpdate}
+          />
+        )}
 
         {/* Footer */}
         <footer className="footer">
           <div className="footer-left">
-            <span className="footer-brand">WARMUP CONTROL v1.0</span>
+            <span className="footer-brand">X CONTROL DASHBOARD v2.0</span>
           </div>
           <div className="footer-right">
             <span className="footer-status">
@@ -435,6 +825,7 @@ const globalStyles = `
     --accent-purple: #a855f7;
     --accent-green: #00ff88;
     --accent-yellow: #ffcc00;
+    --accent-orange: #ff8800;
   }
 
   html, body {
@@ -496,6 +887,7 @@ const globalStyles = `
     padding: 16px 0 32px;
     border-bottom: 1px solid var(--border);
     margin-bottom: 32px;
+    gap: 24px;
   }
 
   .header-left {
@@ -535,6 +927,51 @@ const globalStyles = `
     color: var(--bg-primary);
     border-radius: 4px;
     letter-spacing: 1px;
+  }
+
+  /* Tabs */
+  .header-tabs {
+    display: flex;
+    gap: 8px;
+    background: var(--bg-card);
+    padding: 4px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+  }
+
+  .tab-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Outfit', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 10px 20px;
+    background: transparent;
+    color: var(--text-secondary);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .tab-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .tab-btn.active {
+    color: var(--text-primary);
+    background: rgba(0, 240, 255, 0.1);
+    box-shadow: 0 0 20px rgba(0, 240, 255, 0.1);
+  }
+
+  .tab-btn.active .tab-icon {
+    color: var(--accent-cyan);
+  }
+
+  .tab-icon {
+    font-size: 14px;
   }
 
   .live-pulse {
@@ -667,6 +1104,10 @@ const globalStyles = `
     margin-bottom: 32px;
   }
 
+  .stats-grid-posts {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+
   .stat-card {
     position: relative;
     background: var(--bg-card);
@@ -704,6 +1145,21 @@ const globalStyles = `
 
   .stat-card-small {
     grid-column: span 1;
+  }
+
+  .stat-card-posts {
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .stat-card-posts .stat-icon {
+    font-size: 36px;
+    margin-bottom: 8px;
+  }
+
+  .stat-card-posts .stat-value {
+    font-size: 48px;
   }
 
   .stat-icon {
@@ -875,6 +1331,10 @@ const globalStyles = `
     animation: pulse 2s ease-in-out infinite;
   }
 
+  .persona-emoji {
+    font-size: 16px;
+  }
+
   .profile-time {
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
@@ -991,6 +1451,164 @@ const globalStyles = `
     margin-left: 6px;
   }
 
+  /* Posts Panel */
+  .posts-panel {
+    max-height: 700px;
+  }
+
+  .posts-section {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .posts-section:last-child {
+    border-bottom: none;
+  }
+
+  .posts-section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 24px;
+    background: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .posts-section-icon {
+    font-size: 14px;
+  }
+
+  .posts-section-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    color: var(--text-secondary);
+  }
+
+  .posts-section-count {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-muted);
+    border-radius: 10px;
+    margin-left: auto;
+  }
+
+  .posts-list {
+    max-height: 280px;
+    overflow-y: auto;
+  }
+
+  .posts-list::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .posts-list::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .posts-list::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+  }
+
+  .post-item {
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.2s;
+    animation: slideIn 0.2s ease-out backwards;
+  }
+
+  .post-item:last-child {
+    border-bottom: none;
+  }
+
+  .post-item:hover {
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .post-item.scheduled {
+    border-left: 3px solid var(--accent-yellow);
+  }
+
+  .post-item.posted {
+    border-left: 3px solid var(--accent-green);
+  }
+
+  .post-item.failed {
+    border-left: 3px solid var(--accent-pink);
+  }
+
+  .post-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .post-emoji {
+    font-size: 14px;
+  }
+
+  .post-handle {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent-cyan);
+  }
+
+  .post-status {
+    font-size: 12px;
+    margin-left: 4px;
+  }
+
+  .post-status.posted {
+    color: var(--accent-green);
+  }
+
+  .post-status.failed {
+    color: var(--accent-pink);
+  }
+
+  .post-time {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: auto;
+  }
+
+  .post-time.scheduled {
+    color: var(--accent-yellow);
+  }
+
+  .post-content {
+    font-size: 13px;
+    color: var(--text-primary);
+    line-height: 1.5;
+    margin-bottom: 6px;
+  }
+
+  .post-error {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--accent-pink);
+    margin-top: 6px;
+    padding: 6px 10px;
+    background: rgba(255, 51, 102, 0.1);
+    border-radius: 6px;
+  }
+
+  .post-media-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--accent-purple);
+    padding: 2px 6px;
+    background: rgba(168, 85, 247, 0.1);
+    border-radius: 4px;
+  }
+
   /* Empty State */
   .empty-state {
     display: flex;
@@ -1036,6 +1654,10 @@ const globalStyles = `
       grid-template-columns: 1fr 1fr;
     }
 
+    .stats-grid-posts {
+      grid-template-columns: 1fr 1fr 1fr;
+    }
+
     .stat-card-large {
       grid-column: span 2;
       grid-row: span 1;
@@ -1055,6 +1677,17 @@ const globalStyles = `
     .main-grid {
       grid-template-columns: 1fr;
     }
+
+    .header {
+      flex-wrap: wrap;
+    }
+
+    .header-tabs {
+      order: 3;
+      width: 100%;
+      justify-content: center;
+      margin-top: 16px;
+    }
   }
 
   @media (max-width: 640px) {
@@ -1068,6 +1701,15 @@ const globalStyles = `
       align-items: flex-start;
     }
 
+    .header-tabs {
+      width: 100%;
+    }
+
+    .tab-btn {
+      flex: 1;
+      justify-content: center;
+    }
+
     .header-right {
       width: 100%;
       justify-content: space-between;
@@ -1075,6 +1717,10 @@ const globalStyles = `
 
     .stats-grid {
       grid-template-columns: 1fr 1fr;
+    }
+
+    .stats-grid-posts {
+      grid-template-columns: 1fr;
     }
 
     .stat-card {
@@ -1087,6 +1733,10 @@ const globalStyles = `
 
     .stat-card-large .stat-value {
       font-size: 32px;
+    }
+
+    .stat-card-posts .stat-value {
+      font-size: 36px;
     }
   }
 `
