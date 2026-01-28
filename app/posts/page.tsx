@@ -83,6 +83,7 @@ export default function PostsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
+  const [activeSection, setActiveSection] = useState<'scheduled' | 'posted' | 'failed'>('scheduled')
 
   const fetchData = async () => {
     try {
@@ -109,9 +110,29 @@ export default function PostsPage() {
     return new Date(ts).toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
-      second: '2-digit',
       hour12: false
     })
+  }
+
+  const formatDateTime = (ts: number | string) => {
+    const date = typeof ts === 'string' ? new Date(ts) : new Date(ts)
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    })
+  }
+
+  const getTimeUntil = (scheduledFor: string) => {
+    const diff = new Date(scheduledFor).getTime() - Date.now()
+    if (diff < 0) return 'overdue'
+    const mins = Math.floor(diff / 60000)
+    if (mins < 60) return `in ${mins}m`
+    const hours = Math.floor(mins / 60)
+    if (hours < 24) return `in ${hours}h ${mins % 60}m`
+    return `in ${Math.floor(hours / 24)}d`
   }
 
   const getRelativeTime = (ts: number) => {
@@ -129,14 +150,28 @@ export default function PostsPage() {
     return text.slice(0, maxLen) + '...'
   }
 
-  const getActionDisplay = (action: string) => {
-    switch (action) {
-      case 'post_scheduled': return { label: 'Scheduled', icon: '⏱', color: '#ffcc00' }
-      case 'post_published': return { label: 'Posted', icon: '✓', color: '#00ff88' }
-      case 'post_failed': return { label: 'Failed', icon: '✕', color: '#ff3366' }
-      default: return { label: action, icon: '•', color: '#8899a6' }
-    }
+  const getTweetUrl = (handle: string, tweetId: string) => {
+    const cleanHandle = handle.replace('@', '')
+    return `https://x.com/${cleanHandle}/status/${tweetId}`
   }
+
+  // Filter events by type
+  const scheduledEvents = data?.recentEvents?.filter(e => e.action === 'post_scheduled') || []
+  const postedEvents = data?.recentEvents?.filter(e => e.action === 'post_published') || []
+  const failedEvents = data?.recentEvents?.filter(e => e.action === 'post_failed') || []
+
+  // Sort scheduled by scheduledFor time
+  const sortedScheduled = [...scheduledEvents].sort((a, b) => {
+    const timeA = a.details?.scheduledFor ? new Date(a.details.scheduledFor).getTime() : 0
+    const timeB = b.details?.scheduledFor ? new Date(b.details.scheduledFor).getTime() : 0
+    return timeA - timeB
+  })
+
+  // Sort posted by timestamp (most recent first)
+  const sortedPosted = [...postedEvents].sort((a, b) => b.timestamp - a.timestamp)
+
+  // Sort failed by timestamp (most recent first)
+  const sortedFailed = [...failedEvents].sort((a, b) => b.timestamp - a.timestamp)
 
   const totals = data?.totals || { scheduled: 0, posted: 0, failed: 0 }
 
@@ -195,7 +230,10 @@ export default function PostsPage() {
 
         {/* Stats Grid */}
         <section className="stats-grid stats-grid-posts">
-          <div className="stat-card stat-card-posts">
+          <button
+            className={`stat-card stat-card-posts clickable ${activeSection === 'scheduled' ? 'selected' : ''}`}
+            onClick={() => setActiveSection('scheduled')}
+          >
             <div className="stat-icon" style={{ color: '#ffcc00' }}>⏱</div>
             <div className="stat-content">
               <div className="stat-value">
@@ -204,9 +242,12 @@ export default function PostsPage() {
               <div className="stat-label">Scheduled</div>
             </div>
             <div className="stat-glow" style={{ background: 'radial-gradient(circle at center, rgba(255,204,0,0.15) 0%, transparent 70%)' }} />
-          </div>
+          </button>
 
-          <div className="stat-card stat-card-posts">
+          <button
+            className={`stat-card stat-card-posts clickable ${activeSection === 'posted' ? 'selected' : ''}`}
+            onClick={() => setActiveSection('posted')}
+          >
             <div className="stat-icon" style={{ color: '#00ff88' }}>✓</div>
             <div className="stat-content">
               <div className="stat-value">
@@ -215,9 +256,12 @@ export default function PostsPage() {
               <div className="stat-label">Posted</div>
             </div>
             <div className="stat-glow" style={{ background: 'radial-gradient(circle at center, rgba(0,255,136,0.15) 0%, transparent 70%)' }} />
-          </div>
+          </button>
 
-          <div className="stat-card stat-card-posts">
+          <button
+            className={`stat-card stat-card-posts clickable ${activeSection === 'failed' ? 'selected' : ''}`}
+            onClick={() => setActiveSection('failed')}
+          >
             <div className="stat-icon" style={{ color: '#ff3366' }}>✕</div>
             <div className="stat-content">
               <div className="stat-value">
@@ -226,120 +270,200 @@ export default function PostsPage() {
               <div className="stat-label">Failed</div>
             </div>
             <div className="stat-glow" style={{ background: 'radial-gradient(circle at center, rgba(255,51,102,0.15) 0%, transparent 70%)' }} />
-          </div>
+          </button>
         </section>
 
-        {/* Main Content Grid */}
-        <div className="main-grid">
-          {/* Accounts Panel */}
-          <section className="panel profiles-panel">
-            <div className="panel-header">
-              <h2 className="panel-title">
-                <span className="panel-title-icon">◈</span>
-                ACCOUNTS
-              </h2>
-              <span className="panel-count">{data?.personas?.length || 0}</span>
-            </div>
-            <div className="profiles-list">
-              {data?.personas?.map((persona, index) => {
-                const total = persona.posted + persona.scheduled + persona.failed
-                const hasActivity = persona.lastActivity !== null
-                return (
-                  <div
-                    key={persona.personaId}
-                    className="profile-card"
-                    style={{ animationDelay: `${index * 50}ms` }}
-                  >
-                    <div className="profile-header">
-                      <div className="profile-id">
-                        <span className="persona-emoji">{persona.emoji}</span>
-                        {persona.handle}
-                      </div>
-                      {hasActivity && (
-                        <span className="profile-time">{getRelativeTime(persona.lastActivity!)}</span>
-                      )}
-                    </div>
-                    <div className="profile-stats">
-                      <span className="profile-stat">
-                        <span style={{ color: '#ffcc00' }}>⏱</span> {persona.scheduled}
-                      </span>
-                      <span className="profile-stat">
-                        <span style={{ color: '#00ff88' }}>✓</span> {persona.posted}
-                      </span>
-                      <span className="profile-stat">
-                        <span style={{ color: '#ff3366' }}>✕</span> {persona.failed}
-                      </span>
-                    </div>
-                    <div className="profile-sessions">
-                      {total} total post{total !== 1 ? 's' : ''} today
-                    </div>
-                  </div>
-                )
-              })}
-              {(!data?.personas || data.personas.length === 0) && (
-                <div className="empty-state">
-                  <span className="empty-icon">◇</span>
-                  <span>No posting activity yet</span>
-                </div>
+        {/* Main Content - Full Width Post List */}
+        <div className="posts-container">
+          {/* Section Header */}
+          <div className="section-header">
+            <h2 className="section-title">
+              {activeSection === 'scheduled' && (
+                <>
+                  <span className="section-icon" style={{ color: '#ffcc00' }}>⏱</span>
+                  SCHEDULED QUEUE
+                  <span className="section-count">{sortedScheduled.length}</span>
+                </>
               )}
-            </div>
-          </section>
+              {activeSection === 'posted' && (
+                <>
+                  <span className="section-icon" style={{ color: '#00ff88' }}>✓</span>
+                  POSTED (LAST 24H)
+                  <span className="section-count">{sortedPosted.length}</span>
+                </>
+              )}
+              {activeSection === 'failed' && (
+                <>
+                  <span className="section-icon" style={{ color: '#ff3366' }}>✕</span>
+                  FAILED
+                  <span className="section-count">{sortedFailed.length}</span>
+                </>
+              )}
+            </h2>
+            {lastUpdate && (
+              <span className="section-update">
+                Updated {formatTime(lastUpdate.getTime())}
+              </span>
+            )}
+          </div>
 
-          {/* Posts Activity Feed */}
-          <section className="panel activity-panel posts-panel">
-            <div className="panel-header">
-              <h2 className="panel-title">
-                <span className="panel-title-icon">◈</span>
-                POST ACTIVITY
-              </h2>
-              {lastUpdate && (
-                <span className="panel-update">
-                  Updated {formatTime(lastUpdate.getTime())}
-                </span>
-              )}
-            </div>
-            <div className="activity-list">
-              {data?.recentEvents?.map((event, i) => {
-                const meta = data.personas.find(p => p.personaId === event.personaId)
-                const actionInfo = getActionDisplay(event.action)
-                return (
-                  <div
-                    key={`${event.timestamp}-${i}`}
-                    className={`activity-item post-event-${event.action.replace('post_', '')}`}
-                    style={{ animationDelay: `${i * 30}ms` }}
-                  >
-                    <span className="activity-time">{formatTime(event.timestamp)}</span>
-                    <span className="post-emoji">{meta?.emoji || '•'}</span>
-                    <span className="activity-profile">{event.handle || meta?.handle || event.personaId}</span>
-                    <span className="action-icon" style={{ color: actionInfo.color, textShadow: `0 0 10px ${actionInfo.color}` }}>
-                      {actionInfo.icon}
-                    </span>
-                    <span className="activity-action">
-                      {actionInfo.label}
-                      {event.details?.content && (
-                        <span className="activity-detail post-content-preview">
-                          {truncateText(event.details.content, 60)}
-                        </span>
-                      )}
-                    </span>
-                    {event.details?.error && (
-                      <span className="post-error-inline">{truncateText(event.details.error, 40)}</span>
-                    )}
-                    {event.details?.mediaIncluded && (
-                      <span className="post-media-badge">+ media</span>
-                    )}
+          {/* Posts List */}
+          <div className="posts-list">
+            {/* Scheduled Section */}
+            {activeSection === 'scheduled' && (
+              <>
+                {sortedScheduled.length === 0 ? (
+                  <div className="empty-state">
+                    <span className="empty-icon">◇</span>
+                    <span>No scheduled posts</span>
+                    <span className="empty-hint">Posts will appear here when they're queued</span>
                   </div>
-                )
-              })}
-              {(!data?.recentEvents || data.recentEvents.length === 0) && (
-                <div className="empty-state">
-                  <span className="empty-icon">◇</span>
-                  <span>No post activity yet</span>
-                  <span className="empty-hint">Events will appear here when posts are scheduled or published</span>
+                ) : (
+                  sortedScheduled.map((event, i) => {
+                    const meta = data?.personas.find(p => p.personaId === event.personaId)
+                    return (
+                      <div key={`${event.timestamp}-${i}`} className="post-card scheduled">
+                        <div className="post-card-header">
+                          <div className="post-card-meta">
+                            <span className="post-emoji">{meta?.emoji || '•'}</span>
+                            <span className="post-handle">{event.handle || meta?.handle || event.personaId}</span>
+                            {event.details?.originalAuthor && (
+                              <span className="post-source">via {event.details.originalAuthor}</span>
+                            )}
+                          </div>
+                          <div className="post-card-time">
+                            {event.details?.scheduledFor && (
+                              <>
+                                <span className="time-label">{formatDateTime(event.details.scheduledFor)}</span>
+                                <span className="time-countdown">{getTimeUntil(event.details.scheduledFor)}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <div className="post-card-content">
+                          {event.details?.content || 'No content'}
+                        </div>
+                        {event.details?.mediaIncluded && (
+                          <div className="post-card-badges">
+                            <span className="badge badge-media">📎 Media attached</span>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })
+                )}
+              </>
+            )}
+
+            {/* Posted Section */}
+            {activeSection === 'posted' && (
+              <>
+                {sortedPosted.length === 0 ? (
+                  <div className="empty-state">
+                    <span className="empty-icon">◇</span>
+                    <span>No posts published yet</span>
+                    <span className="empty-hint">Successful posts will appear here with links</span>
+                  </div>
+                ) : (
+                  sortedPosted.map((event, i) => {
+                    const meta = data?.personas.find(p => p.personaId === event.personaId)
+                    const handle = event.handle || meta?.handle || event.personaId
+                    const tweetUrl = event.details?.tweetId ? getTweetUrl(handle, event.details.tweetId) : null
+                    return (
+                      <div key={`${event.timestamp}-${i}`} className="post-card posted">
+                        <div className="post-card-header">
+                          <div className="post-card-meta">
+                            <span className="post-emoji">{meta?.emoji || '•'}</span>
+                            <span className="post-handle">{handle}</span>
+                            {event.details?.originalAuthor && (
+                              <span className="post-source">via {event.details.originalAuthor}</span>
+                            )}
+                          </div>
+                          <div className="post-card-time">
+                            <span className="time-label">{getRelativeTime(event.timestamp)}</span>
+                            {tweetUrl && (
+                              <a href={tweetUrl} target="_blank" rel="noopener noreferrer" className="tweet-link">
+                                View Tweet →
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                        <div className="post-card-content">
+                          {event.details?.content || 'No content'}
+                        </div>
+                        {event.details?.mediaIncluded && (
+                          <div className="post-card-badges">
+                            <span className="badge badge-media">📎 Media attached</span>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })
+                )}
+              </>
+            )}
+
+            {/* Failed Section */}
+            {activeSection === 'failed' && (
+              <>
+                {sortedFailed.length === 0 ? (
+                  <div className="empty-state">
+                    <span className="empty-icon">◇</span>
+                    <span>No failed posts</span>
+                    <span className="empty-hint">Failed posts will appear here with error details</span>
+                  </div>
+                ) : (
+                  sortedFailed.map((event, i) => {
+                    const meta = data?.personas.find(p => p.personaId === event.personaId)
+                    return (
+                      <div key={`${event.timestamp}-${i}`} className="post-card failed">
+                        <div className="post-card-header">
+                          <div className="post-card-meta">
+                            <span className="post-emoji">{meta?.emoji || '•'}</span>
+                            <span className="post-handle">{event.handle || meta?.handle || event.personaId}</span>
+                            {event.details?.originalAuthor && (
+                              <span className="post-source">via {event.details.originalAuthor}</span>
+                            )}
+                          </div>
+                          <div className="post-card-time">
+                            <span className="time-label">{getRelativeTime(event.timestamp)}</span>
+                          </div>
+                        </div>
+                        <div className="post-card-content">
+                          {event.details?.content || 'No content'}
+                        </div>
+                        {event.details?.error && (
+                          <div className="post-card-error">
+                            <span className="error-label">Error:</span> {event.details.error}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Accounts Summary */}
+        <div className="accounts-summary">
+          <div className="accounts-header">
+            <h3 className="accounts-title">ACCOUNTS OVERVIEW</h3>
+          </div>
+          <div className="accounts-grid">
+            {data?.personas?.map((persona) => (
+              <div key={persona.personaId} className="account-chip">
+                <span className="account-emoji">{persona.emoji}</span>
+                <span className="account-handle">{persona.handle}</span>
+                <div className="account-stats">
+                  <span className="chip-stat scheduled">{persona.scheduled}</span>
+                  <span className="chip-stat posted">{persona.posted}</span>
+                  <span className="chip-stat failed">{persona.failed}</span>
                 </div>
-              )}
-            </div>
-          </section>
+              </div>
+            ))}
+          </div>
         </div>
 
         <footer className="footer">
@@ -653,6 +777,15 @@ const globalStyles = `
     border-color: rgba(255, 255, 255, 0.1);
   }
 
+  .stat-card.clickable {
+    cursor: pointer;
+  }
+
+  .stat-card.selected {
+    border-color: var(--accent-cyan);
+    box-shadow: 0 0 30px rgba(0, 240, 255, 0.15);
+  }
+
   .stat-card-posts {
     flex-direction: column;
     justify-content: center;
@@ -699,22 +832,17 @@ const globalStyles = `
     pointer-events: none;
   }
 
-  .main-grid {
-    display: grid;
-    grid-template-columns: 1fr 1.5fr;
-    gap: 24px;
-    margin-bottom: 32px;
-  }
-
-  .panel {
+  /* Posts Container */
+  .posts-container {
     background: var(--bg-card);
     backdrop-filter: blur(20px);
     border: 1px solid var(--border);
     border-radius: 16px;
     overflow: hidden;
+    margin-bottom: 24px;
   }
 
-  .panel-header {
+  .section-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -722,66 +850,85 @@ const globalStyles = `
     border-bottom: 1px solid var(--border);
   }
 
-  .panel-title {
+  .section-title {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: 13px;
+    gap: 12px;
+    font-size: 14px;
     font-weight: 700;
     letter-spacing: 2px;
-    color: var(--text-secondary);
+    color: var(--text-primary);
   }
 
-  .panel-title-icon {
-    color: var(--accent-cyan);
+  .section-icon {
+    font-size: 18px;
   }
 
-  .panel-count {
+  .section-count {
     font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
     font-weight: 600;
     padding: 4px 10px;
-    background: rgba(0, 240, 255, 0.1);
-    color: var(--accent-cyan);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-secondary);
     border-radius: 20px;
   }
 
-  .panel-update {
+  .section-update {
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     color: var(--text-muted);
   }
 
-  .profiles-list {
-    padding: 16px;
+  .posts-list {
     max-height: 500px;
     overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+    padding: 16px;
   }
 
-  .profiles-list::-webkit-scrollbar {
+  .posts-list::-webkit-scrollbar {
     width: 6px;
   }
 
-  .profiles-list::-webkit-scrollbar-track {
+  .posts-list::-webkit-scrollbar-track {
     background: transparent;
   }
 
-  .profiles-list::-webkit-scrollbar-thumb {
+  .posts-list::-webkit-scrollbar-thumb {
     background: var(--border);
     border-radius: 3px;
   }
 
-  .profile-card {
-    position: relative;
+  /* Post Cards */
+  .post-card {
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 16px;
+    margin-bottom: 12px;
     transition: all 0.2s;
     animation: fadeIn 0.3s ease-out backwards;
+  }
+
+  .post-card:last-child {
+    margin-bottom: 0;
+  }
+
+  .post-card:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .post-card.scheduled {
+    border-left: 3px solid var(--accent-yellow);
+  }
+
+  .post-card.posted {
+    border-left: 3px solid var(--accent-green);
+  }
+
+  .post-card.failed {
+    border-left: 3px solid var(--accent-pink);
   }
 
   @keyframes fadeIn {
@@ -795,185 +942,191 @@ const globalStyles = `
     }
   }
 
-  .profile-card:hover {
+  .post-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 12px;
+  }
+
+  .post-card-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .post-emoji {
+    font-size: 18px;
+  }
+
+  .post-handle {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent-cyan);
+  }
+
+  .post-source {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .post-card-time {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+  }
+
+  .time-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .time-countdown {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent-yellow);
+  }
+
+  .tweet-link {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent-cyan);
+    text-decoration: none;
+    padding: 4px 10px;
+    background: rgba(0, 240, 255, 0.1);
+    border-radius: 6px;
+    transition: all 0.2s;
+  }
+
+  .tweet-link:hover {
+    background: rgba(0, 240, 255, 0.2);
+  }
+
+  .post-card-content {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .post-card-badges {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 6px;
+  }
+
+  .badge-media {
+    background: rgba(168, 85, 247, 0.1);
+    color: var(--accent-purple);
+  }
+
+  .post-card-error {
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: rgba(255, 51, 102, 0.1);
+    border-radius: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--accent-pink);
+  }
+
+  .error-label {
+    font-weight: 600;
+  }
+
+  /* Accounts Summary */
+  .accounts-summary {
+    background: var(--bg-card);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 32px;
+  }
+
+  .accounts-header {
+    margin-bottom: 16px;
+  }
+
+  .accounts-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--text-secondary);
+  }
+
+  .accounts-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .account-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    transition: all 0.2s;
+  }
+
+  .account-chip:hover {
     background: rgba(255, 255, 255, 0.04);
     border-color: rgba(255, 255, 255, 0.1);
   }
 
-  .profile-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 12px;
-  }
-
-  .profile-id {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--accent-cyan);
-  }
-
-  .persona-emoji {
-    font-size: 16px;
-  }
-
-  .profile-time {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: var(--text-muted);
-  }
-
-  .profile-stats {
-    display: flex;
-    gap: 16px;
-    margin-bottom: 8px;
-  }
-
-  .profile-stat {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
-    color: var(--text-primary);
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .profile-sessions {
-    font-size: 12px;
-    color: var(--text-muted);
-  }
-
-  .activity-panel {
-    max-height: 600px;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .posts-panel {
-    max-height: 700px;
-  }
-
-  .activity-list {
-    flex: 1;
-    overflow-y: auto;
-    padding: 8px 0;
-  }
-
-  .activity-list::-webkit-scrollbar {
-    width: 6px;
-  }
-
-  .activity-list::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .activity-list::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 3px;
-  }
-
-  .activity-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 24px;
-    border-bottom: 1px solid var(--border);
-    font-size: 13px;
-    transition: background 0.2s;
-    animation: slideIn 0.2s ease-out backwards;
-  }
-
-  @keyframes slideIn {
-    from {
-      opacity: 0;
-      transform: translateX(-10px);
-    }
-    to {
-      opacity: 1;
-      transform: translateX(0);
-    }
-  }
-
-  .activity-item:hover {
-    background: rgba(255, 255, 255, 0.02);
-  }
-
-  .post-event-scheduled {
-    border-left: 3px solid var(--accent-yellow);
-  }
-
-  .post-event-published {
-    border-left: 3px solid var(--accent-green);
-  }
-
-  .post-event-failed {
-    border-left: 3px solid var(--accent-pink);
-  }
-
-  .activity-time {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: var(--text-muted);
-    min-width: 70px;
-  }
-
-  .post-emoji {
+  .account-emoji {
     font-size: 14px;
   }
 
-  .activity-profile {
+  .account-handle {
     font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
-    font-weight: 600;
-    color: var(--accent-cyan);
-    min-width: 80px;
-  }
-
-  .action-icon {
-    font-size: 14px;
-    width: 20px;
-    text-align: center;
-  }
-
-  .activity-action {
+    font-weight: 500;
     color: var(--text-primary);
   }
 
-  .activity-detail {
-    color: var(--text-secondary);
-    margin-left: 6px;
+  .account-stats {
+    display: flex;
+    gap: 6px;
   }
 
-  .post-content-preview {
-    display: block;
-    margin-top: 4px;
-    font-size: 12px;
-    color: var(--text-secondary);
-    font-style: normal;
-  }
-
-  .post-error-inline {
+  .chip-stat {
     font-family: 'JetBrains Mono', monospace;
     font-size: 10px;
-    color: var(--accent-pink);
-    padding: 2px 8px;
-    background: rgba(255, 51, 102, 0.1);
-    border-radius: 4px;
-    margin-left: auto;
-  }
-
-  .post-media-badge {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    color: var(--accent-purple);
+    font-weight: 600;
     padding: 2px 6px;
-    background: rgba(168, 85, 247, 0.1);
     border-radius: 4px;
-    margin-left: 8px;
+  }
+
+  .chip-stat.scheduled {
+    background: rgba(255, 204, 0, 0.1);
+    color: var(--accent-yellow);
+  }
+
+  .chip-stat.posted {
+    background: rgba(0, 255, 136, 0.1);
+    color: var(--accent-green);
+  }
+
+  .chip-stat.failed {
+    background: rgba(255, 51, 102, 0.1);
+    color: var(--accent-pink);
   }
 
   .empty-state {
@@ -1022,10 +1175,6 @@ const globalStyles = `
   @media (max-width: 1024px) {
     .stats-grid-posts {
       grid-template-columns: 1fr 1fr 1fr;
-    }
-
-    .main-grid {
-      grid-template-columns: 1fr;
     }
 
     .header {
@@ -1079,6 +1228,15 @@ const globalStyles = `
 
     .stat-card-posts .stat-value {
       font-size: 36px;
+    }
+
+    .accounts-grid {
+      flex-direction: column;
+    }
+
+    .account-chip {
+      width: 100%;
+      justify-content: space-between;
     }
   }
 `
