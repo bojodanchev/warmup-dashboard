@@ -29,19 +29,21 @@ interface WarmupData {
   recentEvents: ActivityEvent[]
 }
 
-interface StoredRepost {
-  id: string
-  detectedPostId: string
+interface PostEvent {
+  timestamp: number
   personaId: string
-  originalTweetId: string
-  originalAuthor: string
-  spunContent: string
-  postedTweetId?: string
-  mediaIncluded: boolean
-  scheduledFor: string
-  postedAt?: string
-  status: 'scheduled' | 'posted' | 'failed'
-  error?: string
+  handle?: string
+  action: 'post_scheduled' | 'post_published' | 'post_failed'
+  details?: {
+    repostId?: string
+    content?: string
+    tweetId?: string
+    originalAuthor?: string
+    scheduledFor?: string
+    error?: string
+    mediaIncluded?: boolean
+  }
+  receivedAt?: number
 }
 
 interface PersonaPostStats {
@@ -52,7 +54,7 @@ interface PersonaPostStats {
   scheduled: number
   posted: number
   failed: number
-  lastActivity: string | null
+  lastActivity: number | null
 }
 
 interface PostsData {
@@ -63,8 +65,7 @@ interface PostsData {
     failed: number
   }
   personas: PersonaPostStats[]
-  recentPosts: StoredRepost[]
-  upcomingPosts: StoredRepost[]
+  recentEvents: PostEvent[]
 }
 
 type TabType = 'warmup' | 'posts'
@@ -367,30 +368,17 @@ function PostsTab({ data, loading, lastUpdate }: {
   loading: boolean
   lastUpdate: Date | null
 }) {
-  const formatTime = (iso: string) => {
-    return new Date(iso).toLocaleTimeString('en-US', {
+  const formatTime = (ts: number) => {
+    return new Date(ts).toLocaleTimeString('en-US', {
       hour: '2-digit',
       minute: '2-digit',
+      second: '2-digit',
       hour12: false
     })
   }
 
-  const formatDate = (iso: string) => {
-    const date = new Date(iso)
-    const today = new Date()
-    const tomorrow = new Date(today)
-    tomorrow.setDate(tomorrow.getDate() + 1)
-
-    if (date.toDateString() === today.toDateString()) {
-      return 'Today'
-    } else if (date.toDateString() === tomorrow.toDateString()) {
-      return 'Tomorrow'
-    }
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-  }
-
-  const getRelativeTime = (iso: string) => {
-    const diff = Date.now() - new Date(iso).getTime()
+  const getRelativeTime = (ts: number) => {
+    const diff = Date.now() - ts
     const mins = Math.floor(diff / 60000)
     if (mins < 1) return 'just now'
     if (mins < 60) return `${mins}m ago`
@@ -398,18 +386,19 @@ function PostsTab({ data, loading, lastUpdate }: {
     return `${Math.floor(mins / 1440)}d ago`
   }
 
-  const getTimeUntil = (iso: string) => {
-    const diff = new Date(iso).getTime() - Date.now()
-    const mins = Math.floor(diff / 60000)
-    if (mins < 1) return 'now'
-    if (mins < 60) return `in ${mins}m`
-    if (mins < 1440) return `in ${Math.floor(mins / 60)}h`
-    return `in ${Math.floor(mins / 1440)}d`
-  }
-
   const truncateText = (text: string, maxLen: number) => {
+    if (!text) return ''
     if (text.length <= maxLen) return text
     return text.slice(0, maxLen) + '...'
+  }
+
+  const getActionDisplay = (action: string) => {
+    switch (action) {
+      case 'post_scheduled': return { label: 'scheduled', icon: '⏱', color: '#ffcc00' }
+      case 'post_published': return { label: 'posted', icon: '✓', color: '#00ff88' }
+      case 'post_failed': return { label: 'failed', icon: '✕', color: '#ff3366' }
+      default: return { label: action, icon: '•', color: '#8899a6' }
+    }
   }
 
   const totals = data?.totals || { scheduled: 0, posted: 0, failed: 0 }
@@ -494,7 +483,7 @@ function PostsTab({ data, loading, lastUpdate }: {
                     </span>
                   </div>
                   <div className="profile-sessions">
-                    {total} total post{total !== 1 ? 's' : ''}
+                    {total} total post{total !== 1 ? 's' : ''} today
                   </div>
                 </div>
               )
@@ -508,99 +497,60 @@ function PostsTab({ data, loading, lastUpdate }: {
           </div>
         </section>
 
-        {/* Posts Feed */}
+        {/* Posts Activity Feed */}
         <section className="panel activity-panel posts-panel">
           <div className="panel-header">
             <h2 className="panel-title">
               <span className="panel-title-icon">◈</span>
-              POST QUEUE
+              POST ACTIVITY
             </h2>
             {lastUpdate && (
               <span className="panel-update">
-                Updated {formatTime(lastUpdate.toISOString())}
+                Updated {formatTime(lastUpdate.getTime())}
               </span>
             )}
           </div>
-
-          {/* Upcoming Posts */}
-          {data?.upcomingPosts && data.upcomingPosts.length > 0 && (
-            <div className="posts-section">
-              <div className="posts-section-header">
-                <span className="posts-section-icon" style={{ color: '#ffcc00' }}>⏱</span>
-                <span className="posts-section-title">UPCOMING</span>
-                <span className="posts-section-count">{data.upcomingPosts.length}</span>
+          <div className="activity-list">
+            {data?.recentEvents?.map((event, i) => {
+              const meta = data.personas.find(p => p.personaId === event.personaId)
+              const actionInfo = getActionDisplay(event.action)
+              return (
+                <div
+                  key={`${event.timestamp}-${i}`}
+                  className={`activity-item post-event-${event.action.replace('post_', '')}`}
+                  style={{ animationDelay: `${i * 30}ms` }}
+                >
+                  <span className="activity-time">{formatTime(event.timestamp)}</span>
+                  <span className="post-emoji">{meta?.emoji || '•'}</span>
+                  <span className="activity-profile">{event.handle || meta?.handle || event.personaId}</span>
+                  <span className="action-icon" style={{ color: actionInfo.color, textShadow: `0 0 10px ${actionInfo.color}` }}>
+                    {actionInfo.icon}
+                  </span>
+                  <span className="activity-action">
+                    {actionInfo.label}
+                    {event.details?.content && (
+                      <span className="activity-detail post-content-preview">
+                        {truncateText(event.details.content, 60)}
+                      </span>
+                    )}
+                  </span>
+                  {event.details?.error && (
+                    <span className="post-error-inline">{truncateText(event.details.error, 40)}</span>
+                  )}
+                  {event.details?.mediaIncluded && (
+                    <span className="post-media-badge">+ media</span>
+                  )}
+                </div>
+              )
+            })}
+            {(!data?.recentEvents || data.recentEvents.length === 0) && (
+              <div className="empty-state">
+                <span className="empty-icon">◇</span>
+                <span>No post activity yet</span>
+                <span className="empty-hint">Events will appear here when posts are scheduled or published</span>
               </div>
-              <div className="posts-list">
-                {data.upcomingPosts.map((post, i) => {
-                  const meta = data.personas.find(p => p.personaId === post.personaId)
-                  return (
-                    <div
-                      key={post.id}
-                      className="post-item scheduled"
-                      style={{ animationDelay: `${i * 30}ms` }}
-                    >
-                      <div className="post-meta">
-                        <span className="post-emoji">{meta?.emoji || '•'}</span>
-                        <span className="post-handle">{meta?.handle || post.personaId}</span>
-                        <span className="post-time scheduled">{getTimeUntil(post.scheduledFor)}</span>
-                      </div>
-                      <div className="post-content">{truncateText(post.spunContent, 120)}</div>
-                      {post.mediaIncluded && (
-                        <span className="post-media-badge">+ media</span>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Recent Posts */}
-          {data?.recentPosts && data.recentPosts.length > 0 && (
-            <div className="posts-section">
-              <div className="posts-section-header">
-                <span className="posts-section-icon" style={{ color: '#00ff88' }}>✓</span>
-                <span className="posts-section-title">RECENT</span>
-                <span className="posts-section-count">{data.recentPosts.length}</span>
-              </div>
-              <div className="posts-list">
-                {data.recentPosts.map((post, i) => {
-                  const meta = data.personas.find(p => p.personaId === post.personaId)
-                  const isPosted = post.status === 'posted'
-                  return (
-                    <div
-                      key={post.id}
-                      className={`post-item ${post.status}`}
-                      style={{ animationDelay: `${i * 30}ms` }}
-                    >
-                      <div className="post-meta">
-                        <span className="post-emoji">{meta?.emoji || '•'}</span>
-                        <span className="post-handle">{meta?.handle || post.personaId}</span>
-                        <span className={`post-status ${post.status}`}>
-                          {isPosted ? '✓' : '✕'}
-                        </span>
-                        <span className="post-time">{getRelativeTime(post.postedAt || post.scheduledFor)}</span>
-                      </div>
-                      <div className="post-content">{truncateText(post.spunContent, 120)}</div>
-                      {post.error && (
-                        <div className="post-error">{truncateText(post.error, 60)}</div>
-                      )}
-                      {post.mediaIncluded && (
-                        <span className="post-media-badge">+ media</span>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {(!data?.upcomingPosts?.length && !data?.recentPosts?.length) && (
-            <div className="empty-state">
-              <span className="empty-icon">◇</span>
-              <span>No posts yet</span>
-            </div>
-          )}
+            )}
+          </div>
         </section>
       </div>
     </>
@@ -1607,6 +1557,44 @@ const globalStyles = `
     padding: 2px 6px;
     background: rgba(168, 85, 247, 0.1);
     border-radius: 4px;
+    margin-left: 8px;
+  }
+
+  /* Post Event Activity Items */
+  .post-event-scheduled {
+    border-left: 3px solid var(--accent-yellow);
+  }
+
+  .post-event-published {
+    border-left: 3px solid var(--accent-green);
+  }
+
+  .post-event-failed {
+    border-left: 3px solid var(--accent-pink);
+  }
+
+  .post-content-preview {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-style: normal;
+  }
+
+  .post-error-inline {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--accent-pink);
+    padding: 2px 8px;
+    background: rgba(255, 51, 102, 0.1);
+    border-radius: 4px;
+    margin-left: auto;
+  }
+
+  .empty-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    opacity: 0.7;
   }
 
   /* Empty State */
